@@ -1,0 +1,28 @@
+// Create these as individual measures in Power BI (not one pasted script).
+// The measures below assume an imported table named 'upi_transactions'.
+
+Total Transactions = COUNTROWS('upi_transactions')
+
+Successful Transactions = CALCULATE(COUNTROWS('upi_transactions'), 'upi_transactions'[status] = "SUCCESS")
+
+Failed Transactions = CALCULATE(COUNTROWS('upi_transactions'), 'upi_transactions'[status] = "FAILED")
+
+Pending Transactions = CALCULATE(COUNTROWS('upi_transactions'), 'upi_transactions'[status] = "PENDING")
+
+Resolved Transactions = [Successful Transactions] + [Failed Transactions]
+
+Success Rate % = DIVIDE([Successful Transactions], [Resolved Transactions], 0) * 100
+
+Failure Rate % = DIVIDE([Failed Transactions], [Resolved Transactions], 0) * 100
+
+Successful Value INR = CALCULATE(SUM('upi_transactions'[amount_inr]), 'upi_transactions'[status] = "SUCCESS")
+
+Average Successful Transaction INR = DIVIDE([Successful Value INR], [Successful Transactions], 0)
+
+
+// Additional operations metrics (add each measure separately).
+Attempted Value INR = SUM('upi_transactions'[amount_inr])
+Failed Attempted Value INR = CALCULATE(SUM('upi_transactions'[amount_inr]), 'upi_transactions'[status] = "FAILED")
+Pending Rate % = DIVIDE([Pending Transactions], [Total Transactions], 0) * 100
+Net Success Rate % = DIVIDE([Successful Transactions], [Total Transactions], 0) * 100
+Avg Attempted Value INR = DIVIDE([Attempted Value INR], [Total Transactions], 0)
