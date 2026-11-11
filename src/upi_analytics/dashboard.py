@@ -7,8 +7,33 @@ import psycopg
 from psycopg.rows import dict_row
 
 st.set_page_config(page_title="UPI Payment Intelligence", page_icon="📊", layout="wide")
-st.title("UPI Payment Intelligence")
-st.caption("Synthetic transactions only · All transaction times stored in UTC · Daily summaries use IST")
+st.markdown("""<style>
+.block-container {max-width: 1450px;padding-top:2rem}
+[data-testid="stMetric"] {background:#f7f9fc;border:1px solid #e5eaf1;border-radius:12px;padding:16px}
+h1,h2,h3 {letter-spacing:-.025em}
+</style>""", unsafe_allow_html=True)
+st.title("Payment operations")
+st.caption("Synthetic UPI transactions  ·  UTC timestamps  ·  Operations intelligence")
+
+BANK_COLORS = {"AXIS":"#4f46e5","HDFC":"#0891b2","ICICI":"#d97706","SBI":"#059669"}
+def clean_chart(fig, *, percent=False, horizontal=False):
+    fig.update_layout(template="plotly_white",height=320,
+        margin=dict(l=10,r=12,t=32,b=12),
+        paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(size=12,color="#526174"),
+        legend=dict(orientation="h",y=1.02,x=0,title_text=""),
+        hovermode="x unified")
+    fig.update_xaxes(showgrid=False,zeroline=False,title_text="",tickfont=dict(size=11))
+    fig.update_yaxes(showgrid=True,gridcolor="#edf1f6",zeroline=False,
+        title_text="",tickfont=dict(size=11),
+        tickformat=".0f" if percent else "~s")
+    if percent:
+        fig.update_yaxes(ticksuffix="%",rangemode="tozero")
+    if horizontal:
+        fig.update_xaxes(tickformat="~s")
+        fig.update_yaxes(showgrid=False)
+    return fig
+
 
 @st.cache_data(ttl=60)
 def query(sql: str, args: tuple = ()) -> pd.DataFrame:
@@ -25,7 +50,8 @@ if banks.empty:
     st.info("No transactions yet. Run `python -m upi_analytics.cli demo` or start the worker.")
     st.stop()
 
-selected = st.sidebar.multiselect("Banks", banks.bank.tolist(), default=banks.bank.tolist())
+st.sidebar.header("Filters")
+selected = st.sidebar.multiselect("Bank segments", banks.bank.tolist(), default=banks.bank.tolist())
 days = st.sidebar.slider("Lookback days", 1, 90, 30)
 if not selected:
     st.warning("Select at least one bank")
@@ -46,7 +72,7 @@ resolved = int(summary.successes + summary.failures)
 success_rate = summary.successes / resolved * 100 if resolved else 0
 cols = st.columns(5)
 for col, label, val in zip(cols,
-    ["Total transactions", "Success rate (resolved)", "Failures", "Pending", "Successful value"],
+    ["Transactions", "Success rate · resolved", "Failed", "Pending", "Successful value"],
     [f"{int(summary.total):,}", f"{success_rate:.2f}%", f"{int(summary.failures):,}",
      f"{int(summary.pending):,}", f"₹{float(summary.value_inr):,.0f}"]):
     col.metric(label, val)
@@ -58,11 +84,27 @@ hourly = query(f"""SELECT date_trunc('hour',event_ts) AS hour_utc, bank,
     FROM upi_transactions {where} GROUP BY 1,2 ORDER BY 1,2""", params)
 if not hourly.empty:
     hourly["failure_rate_pct"] = (hourly.failures / hourly.resolved.replace(0, float("nan")) * 100).fillna(0)
-    left, right = st.columns(2)
-    left.plotly_chart(px.line(hourly, x="hour_utc", y="transactions", color="bank",
-                              title="Hourly transaction volume (UTC)"), use_container_width=True)
-    right.plotly_chart(px.line(hourly, x="hour_utc", y="failure_rate_pct", color="bank",
-                               title="Failure rate by bank (%)"), use_container_width=True)
+    if days > 7:
+        hourly["period"] = pd.to_datetime(hourly["hour_utc"], utc=True).dt.floor("D")
+        chart_data = hourly.groupby(["period","bank"], as_index=False)[["transactions","failures","resolved"]].sum()
+        chart_data["failure_rate_pct"] = (chart_data.failures / chart_data.resolved.replace(0,float("nan")) * 100).fillna(0)
+        cadence = "Daily"
+    else:
+        chart_data = hourly.rename(columns={"hour_utc":"period"})
+        cadence = "Hourly"
+    st.subheader("Traffic & reliability")
+    st.caption(f"{cadence} trends · {days}-day window · Hover for exact values")
+    left, right = st.columns(2, gap="large")
+    with left:
+        fig = px.line(chart_data,x="period",y="transactions",color="bank",
+            color_discrete_map=BANK_COLORS,title="Transaction volume")
+        fig.update_traces(line=dict(width=2.2))
+        st.plotly_chart(clean_chart(fig),use_container_width=True)
+    with right:
+        fig = px.line(chart_data,x="period",y="failure_rate_pct",color="bank",
+            color_discrete_map=BANK_COLORS,title="Failure rate · resolved transactions")
+        fig.update_traces(line=dict(width=2.2))
+        st.plotly_chart(clean_chart(fig,percent=True),use_container_width=True)
 
 bank_summary = query(f"""SELECT bank,COUNT(*)::int AS transactions,
     COUNT(*) FILTER (WHERE status='FAILED')::int AS failures,
@@ -70,14 +112,30 @@ bank_summary = query(f"""SELECT bank,COUNT(*)::int AS transactions,
     FROM upi_transactions {where} GROUP BY bank ORDER BY bank""", params)
 reason_summary = query(f"""SELECT bank,failure_reason,COUNT(*)::int AS failures
     FROM upi_transactions {where} AND status='FAILED' GROUP BY 1,2 ORDER BY failures DESC""", params)
-left, right = st.columns(2)
-left.plotly_chart(px.bar(bank_summary, x="bank", y=["successes", "failures"], barmode="stack",
-                         title="Resolved transactions by bank"), use_container_width=True)
-if not reason_summary.empty:
-    right.plotly_chart(px.bar(reason_summary, x="failure_reason", y="failures", color="bank",
-                              title="Failure reasons"), use_container_width=True)
+st.subheader("Bank performance")
+st.caption("Transaction outcomes and leading failure reasons")
+left, right = st.columns(2,gap="large")
+with left:
+    long = bank_summary.melt(id_vars="bank",value_vars=["successes","failures"],
+        var_name="status",value_name="count")
+    fig = px.bar(long,x="bank",y="count",color="status",barmode="stack",
+        color_discrete_map={"successes":"#059669","failures":"#ef6b6b"},
+        title="Resolved transactions by bank")
+    fig.update_layout(bargap=.45)
+    st.plotly_chart(clean_chart(fig),use_container_width=True)
+with right:
+    if not reason_summary.empty:
+        top = reason_summary.groupby("failure_reason",as_index=False)["failures"].sum()
+        top = top.nlargest(7,"failures").sort_values("failures")
+        fig = px.bar(top,x="failures",y="failure_reason",orientation="h",
+            color_discrete_sequence=["#64748b"],title="Top failure reasons")
+        fig.update_layout(showlegend=False,bargap=.4)
+        st.plotly_chart(clean_chart(fig,horizontal=True),use_container_width=True)
+    else:
+        st.info("No failures recorded for this selection.")
 
 st.subheader("Anomaly alerts")
+st.caption("Recent alerts across selected bank segments")
 alerts = query("""SELECT bucket_start AS hour_utc,kind,bank,severity,metric,baseline,message,
     notification_status FROM alerts WHERE bank = ANY(%s) ORDER BY bucket_start DESC LIMIT 100""", (selected,))
 if alerts.empty:
@@ -86,6 +144,7 @@ else:
     st.dataframe(alerts, use_container_width=True, hide_index=True)
 
 st.subheader("Recent ingestion runs")
+st.caption("Pipeline audit history")
 logs = query("""SELECT started_at,source,input_rows,accepted_rows,duplicate_rows,rejected_rows,status
     FROM ingestion_runs ORDER BY started_at DESC LIMIT 15""")
 st.dataframe(logs, use_container_width=True, hide_index=True)
