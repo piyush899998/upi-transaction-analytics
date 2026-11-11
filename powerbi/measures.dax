@@ -1,0 +1,17 @@
+Total Transactions = COUNTROWS(upi_transactions)
+
+Successful Transactions = CALCULATE([Total Transactions], upi_transactions[status] = "SUCCESS")
+
+Failed Transactions = CALCULATE([Total Transactions], upi_transactions[status] = "FAILED")
+
+Pending Transactions = CALCULATE([Total Transactions], upi_transactions[status] = "PENDING")
+
+Resolved Transactions = [Successful Transactions] + [Failed Transactions]
+
+Success Rate % = DIVIDE([Successful Transactions], [Resolved Transactions], 0)
+
+Failure Rate % = DIVIDE([Failed Transactions], [Resolved Transactions], 0)
+
+Total Value INR = SUM(upi_transactions[amount_inr])
+
+Successful Value INR = CALCULATE([Total Value INR], upi_transactions[status] = "SUCCESS")
