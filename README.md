@@ -48,6 +48,29 @@ Inspect alerts and ingestion metrics inside the dashboard. You should see the IC
 
 Stop services: `docker compose down`. To **erase all sample data**, `docker compose down -v` (destructive).
 
+## Recruiter quick demo (Windows / macOS / Linux)
+
+**No Python installation, PostgreSQL installation, API keys, or Power BI account required** to explore the working Streamlit dashboard. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/), start it, and run these commands from a terminal in the cloned repository:
+
+```bash
+git clone https://github.com/piyush899998/upi-transaction-analytics.git
+cd upi-transaction-analytics
+docker compose up --build -d
+docker compose ps
+```
+
+Open **http://localhost:8501**. On first launch the worker creates the schema and synthetic history; if the dashboard initially reports no data, wait for the worker to finish and refresh. Inspect progress with:
+
+```bash
+docker compose logs --tail=60 worker
+```
+
+**If ports 5432 or 8501 are already in use** (common if you run other PostgreSQL/Streamlit projects): edit only the host side of the mappings in `compose.yaml`. Under `db`, change `"127.0.0.1:5432:5432"` to `"127.0.0.1:5433:5432"`; under `dashboard`, change `"127.0.0.1:8501:8501"` to `"127.0.0.1:8502:8501"`. Then run `docker compose up -d` and open **http://localhost:8502**. Keep the right-hand container ports unchanged: PostgreSQL listens on **5432** inside Docker and Streamlit on **8501**. If another service also uses 5433 or 8502, choose other free *host* ports.
+
+**Demo the anomaly logic** by opening the Alerts section, selecting all banks and the 90-day lookback, and showing the seeded ICICI failure spike and SBI traffic drop. Run `docker compose exec worker python -m upi_analytics.cli demo` to repeat the deterministic demo and observe duplicate protection. Data is synthetic; no banking credentials are needed.
+
+**Stop without deleting data:** `docker compose down`. **Permanently delete the demo database volume:** `docker compose down -v` (destructive). Optional email notifications and Power BI reporting are separate enhancements and not required for this walkthrough.
+
 ## Local Python development (with PostgreSQL in Docker)
 
 ```bash
